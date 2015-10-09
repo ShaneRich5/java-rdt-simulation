@@ -1,3 +1,8 @@
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.IntStream;
+
 /**
  * Created by shane on 10/5/15.
  */
@@ -81,6 +86,9 @@ public class StudentNetworkSimulator extends NetworkSimulator
      *
      */
 
+    SenderState senderState;
+    ReceiverState receiverState;
+
     // Add any necessary class variables here.  Remember, you cannot use
     // these variables to send messages error free!  They can only hold
     // state information for A or B.
@@ -103,18 +111,32 @@ public class StudentNetworkSimulator extends NetworkSimulator
     // the receiving upper layer.
     protected void aOutput(Message message)
     {
-        Packet p = new Packet(0,0,0,message.getData());
-        toLayer3(0, p);
-        startTimer(0,5);
+        System.out.println("A -> B (aOutput)");
+        Packet newPacket = senderState.createPacket(message.getData()); // creates the next packet
+        System.out.println("Sending packet: " + newPacket);
+
+        toLayer3(0, newPacket); // pass it to lower level for transmission
+        startTimer(0, 5); // start timer
     }
 
     // This routine will be called whenever a packet sent from the B-side
     // (i.e. as a result of a toLayer3() being done by a B-side procedure)
     // arrives at the A-side.  "packet" is the (possibly corrupted) packet
     // sent from the B-side.
-    protected void aInput(Packet packet)
-    {
-        System.out.println("Received ACK");
+    protected void aInput(Packet packet) {
+        System.out.println("B -> A (aInput)");
+        System.out.println("Received ACK (aInput)");
+
+        if (senderState.checkIntegrity(packet) || senderState.getUnackPacket().getSeqnum() != packet.getAcknum()) {
+            System.out.println("Corrupt");
+            startTimer(0, 20);
+            toLayer3(0, senderState.getUnackPacket());
+        } else {
+            System.out.println("Not corrupt <-->" + packet);
+//            toLayer5(0, packet.getPayload());
+        }
+
+//        startTimer(0, 5);
     }
 
     // This routine will be called when A's timer expires (thus generating a
@@ -123,7 +145,10 @@ public class StudentNetworkSimulator extends NetworkSimulator
     // for how the timer is started and stopped.
     protected void aTimerInterrupt()
     {
-        System.out.println("Timer");
+        Packet p = senderState.getUnackPacket();
+        System.out.println("\nTimer(aTimerInterrupt)\n" + p + "\nRetransmitting...\n");
+
+        toLayer3(0, p);
     }
 
     // This routine will be called once, before any of your other A-side
@@ -132,16 +157,22 @@ public class StudentNetworkSimulator extends NetworkSimulator
     // of entity A).
     protected void aInit()
     {
+        senderState = new SenderState();
     }
 
     // This routine will be called whenever a packet sent from the B-side
     // (i.e. as a result of a toLayer3() being done by an A-side procedure)
     // arrives at the B-side.  "packet" is the (possibly corrupted) packet
     // sent from the A-side.
-    protected void bInput(Packet packet)
-    {
-        System.out.println("Received packet ");
-        toLayer3(1, packet);
+    protected void bInput(Packet packet) {
+        System.out.println("A -> B (bInput)");
+        System.out.println("Received packet(bInput) " + packet);
+
+        // receives packet from A
+        // measures
+        toLayer3(1, receiverState
+                .createPacket(packet.getSeqnum(), (receiverState
+                        .checkIntegrity(packet)) ? "ACK" : "NACK"));
     }
 
     // This routine will be called once, before any of your other B-side
@@ -150,6 +181,7 @@ public class StudentNetworkSimulator extends NetworkSimulator
     // of entity B).
     protected void bInit()
     {
+        receiverState = new ReceiverState();
     }
 
     public static void main(String []args) {
@@ -157,5 +189,104 @@ public class StudentNetworkSimulator extends NetworkSimulator
         StudentNetworkSimulator S = new StudentNetworkSimulator(10, 0.1, 0.1, 1000, 2, 123);
         S.runSimulator();
 
+    }
+
+
+    private class ReceiverState extends State {
+
+        public ReceiverState() {
+            seqnum = 0;
+        }
+
+        public int getExpectedSeqNum() {
+            return seqnum;
+        }
+
+        public void setExpectedSeqNum(int expectedSeqNum) {
+            this.seqnum = expectedSeqNum;
+        }
+
+        @Override
+        public Packet createPacket(String payload) {
+            return new Packet(0, seqnum, calculateChecksum(), payload);
+        }
+
+        public Packet createPacket(int seqnum, String payload){
+            return new Packet(0, seqnum, calculateChecksum(), payload);
+        }
+    }
+
+    private class SenderState extends State {
+
+        public SenderState() {
+            seqnum = 1; // to produce seq 1 on he first packet
+        }
+
+        private Packet unackPacket;
+
+        public int updateSeqNum(){
+            return seqnum += 1;
+        }
+
+        public Packet getUnackPacket(){
+            return unackPacket;
+        }
+
+        @Override
+        public Packet createPacket(String payload) {
+            Packet newPacket = new Packet(flipSeqBit(), 0, calculateChecksum(payload), payload);
+            unackPacket = newPacket;
+            return newPacket;
+        }
+
+
+    }
+
+
+
+
+
+    private abstract class State {
+
+        protected int checksum = 0;
+        protected int seqnum = 0;
+        protected int acknum = 0;
+
+        public abstract Packet createPacket(String payload);
+
+        public int calculatePayloadSize(String payload) {
+            int payloadSize = 0;
+
+            for (int i = 0; i< payload.length(); i++)
+                payloadSize++;
+
+            return payloadSize;
+        }
+
+        public boolean checkIntegrity(Packet packet){
+            int encodedPayload = encodePayload(packet.getPayload());
+            return packet.getChecksum() == encodedPayload + packet.getAcknum() + packet.getSeqnum();
+        }
+
+        public int calculateChecksum(String payload) {
+            return checksum += seqnum + encodePayload(payload);
+        }
+
+        public int calculateChecksum(){
+            return checksum += seqnum;
+        }
+
+        private int encodePayload(String payload){
+            int total = 0;
+
+            for (int i = 0; i < payload.length(); i++)
+                total += payload.charAt(i);
+
+            return total;
+        }
+
+        protected int flipSeqBit(){
+            return seqnum = 1 - seqnum;
+        }
     }
 }

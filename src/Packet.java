@@ -43,7 +43,6 @@ public class Packet
         payload = "";
     }
 
-
     public boolean setSeqnum(int n)
     {
         seqnum = n;

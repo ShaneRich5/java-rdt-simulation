@@ -1,3 +1,6 @@
+/**
+ * Created by shane on 10/5/15.
+ */
 import java.util.Random;
 
 public abstract class NetworkSimulator
